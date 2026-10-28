@@ -8,24 +8,18 @@ if (!token) {
   process.exit(1);
 }
 
+const mode = (process.env.BOT_MODE || "polling").toLowerCase();
 const bot = new TelegramBot(token);
 await bot.init();
-
-const mode = (process.env.BOT_MODE || "polling").toLowerCase();
 
 if (mode === "webhook") {
   const baseUrl = process.env.WEBHOOK_URL;
   const secret = process.env.WEBHOOK_SECRET;
-  if (!baseUrl || !secret || secret.length < 32) {
-    console.error("Webhook mode requires WEBHOOK_URL and WEBHOOK_SECRET (32+ characters).");
-    process.exit(1);
-  }
-
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
   app.post("/telegram-webhook", async (req, res) => {
-    if (req.get("x-telegram-bot-api-secret-token") !== secret) {
+    if (!secret || secret.length < 32 || req.get("x-telegram-bot-api-secret-token") !== secret) {
       return res.sendStatus(401);
     }
     // Acknowledge promptly; process the update asynchronously.
@@ -36,11 +30,15 @@ if (mode === "webhook") {
   const port = Number(process.env.PORT || 3000);
   app.listen(port, async () => {
     console.log(`Webhook server listening on port ${port}`);
+    if (!baseUrl || !secret || secret.length < 32) {
+      console.warn("Webhook not registered yet. Set WEBHOOK_URL and a WEBHOOK_SECRET of at least 32 characters, then redeploy.");
+      return;
+    }
     try {
       await bot.setWebhook(baseUrl, secret);
     } catch (err) {
       console.error("Could not register webhook:", err?.message || err);
-      process.exit(1);
+      // Keep the HTTP server alive so health checks and configuration fixes remain possible.
     }
   });
 } else if (mode === "polling") {
